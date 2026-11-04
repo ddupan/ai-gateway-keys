@@ -19,3 +19,12 @@ export function originAllowed(origin: string | undefined, publicUrl: string): bo
 export function inGroups(groups: unknown, allowed: string[]): boolean {
   return Array.isArray(groups) && groups.some((g) => allowed.includes(String(g)));
 }
+
+// Bao rejects empty custom_metadata values (1..512 chars), so leave unset fields out.
+export function customMetadata(fields: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fields)
+      .filter((e): e is [string, string] => typeof e[1] === "string" && e[1].length > 0)
+      .map(([k, v]) => [k, v.slice(0, 512)]),
+  );
+}

@@ -108,7 +108,7 @@ app.get("/", async (c) => {
       return undefined;
     }),
   ]);
-  keys.sort((a, b) => (a.status === b.status ? b.createdAt.localeCompare(a.createdAt) : a.status === "active" ? -1 : 1));
+  keys.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return c.html(<KeyList user={c.get("user")} keys={keys} usage={use} />);
 });
 
@@ -119,8 +119,9 @@ app.post("/keys", async (c) => {
   if (!validId(id)) return c.html(<Page title="创建失败"><p>名称只能用小写字母、数字和连字符，最长 40 个字符。</p><a href="/">返回</a></Page>, 400);
   const key = newKey();
   if (!(await createKey(id, key, description, c.get("user").name))) {
-    return c.html(<Page title="创建失败"><p>名称 {id} 已被使用过，请换一个。</p><a href="/">返回</a></Page>, 409);
+    return c.html(<Page title="创建失败"><p>名称 {id} 已存在，请换一个。</p><a href="/">返回</a></Page>, 409);
   }
+  console.log(JSON.stringify({ audit: "key.create", id, by: c.get("user").name }));
   await nudge();
   c.header("cache-control", "no-store");
   return c.html(<Created id={id} apiKey={key} />);
@@ -128,8 +129,9 @@ app.post("/keys", async (c) => {
 
 app.post("/keys/:id/revoke", async (c) => {
   const id = c.req.param("id");
-  if (validId(id) && (await getKey(id))?.status === "active") {
-    await revokeKey(id, c.get("user").name);
+  if (validId(id) && (await getKey(id))) {
+    await revokeKey(id);
+    console.log(JSON.stringify({ audit: "key.revoke", id, by: c.get("user").name }));
     await nudge();
   }
   return c.redirect("/");
@@ -149,7 +151,7 @@ const Page: FC<PropsWithChildren<{ title: string }>> = ({ title, children }) => 
       <style>{`
         body{font:15px/1.5 system-ui,sans-serif;max-width:64rem;margin:2rem auto;padding:0 1rem;color:#222}
         table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #ddd}
-        .revoked{color:#999}input{padding:.3rem}button{padding:.3rem .8rem;cursor:pointer}
+input{padding:.3rem}button{padding:.3rem .8rem;cursor:pointer}
         code{background:#f3f3f3;padding:.1rem .3rem;word-break:break-all}.key{font-size:1.1em;padding:.6rem;display:block}
         header{display:flex;justify-content:space-between;align-items:center}
         @media (prefers-color-scheme:dark){body{background:#181818;color:#ddd}code{background:#2a2a2a}th,td{border-color:#333}}
@@ -184,7 +186,7 @@ const KeyList: FC<{ user: User; keys: KeyRecord[]; usage?: Map<string, Usage> }>
         {keys.map((k) => {
           const u = usage?.get(k.id);
           return (
-            <tr class={k.status}>
+            <tr>
               <td>{k.id}</td>
               <td>{k.description}</td>
               <td>{fmt(k.createdAt)}<br /><small>{k.createdBy}</small></td>
@@ -192,13 +194,10 @@ const KeyList: FC<{ user: User; keys: KeyRecord[]; usage?: Map<string, Usage> }>
               <td>{u?.requests30d ?? 0}</td>
               <td>{u?.tokens30d ?? 0}</td>
               <td>
-                {k.status === "active" ? (
+                {k.status === "incomplete" && <small>未完成，未生效 </small>}
                   <form method="post" action={`/keys/${k.id}/revoke`} onsubmit={`return confirm('吊销 ${k.id}？使用它的客户端会立即失效。')`}>
                     <button>吊销</button>
                   </form>
-                ) : (
-                  <small>已吊销 {fmt(k.revokedAt)}<br />{k.revokedBy}</small>
-                )}
               </td>
             </tr>
           );

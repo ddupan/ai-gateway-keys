@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { inGroups, newKey, originAllowed, validId } from "./keys.js";
+import { customMetadata, inGroups, newKey, originAllowed, validId } from "./keys.js";
 
 test("ids", () => {
   for (const ok of ["a", "research-auto", "panxiao81", "x".repeat(40)]) assert.ok(validId(ok), ok);
@@ -23,4 +23,12 @@ test("groups", () => {
   assert.ok(inGroups(["x", "platform-admins"], ["platform-admins"]));
   assert.ok(!inGroups(["x"], ["platform-admins"]));
   assert.ok(!inGroups("platform-admins", ["platform-admins"]));
+});
+
+test("custom metadata drops empty values", () => {
+  assert.deepEqual(customMetadata({ status: "active", description: "", created_by: "u", x: undefined }), {
+    status: "active",
+    created_by: "u",
+  });
+  assert.equal(customMetadata({ d: "x".repeat(600) }).d.length, 512);
 });

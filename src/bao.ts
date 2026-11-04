@@ -1,9 +1,10 @@
 // OpenBao KV v2: one secret per key at <mount>/<prefix>/<id>, field `key`.
-// Bao's own metadata gives created_time; who/why/status live in custom_metadata.
-// The gateway only gets keys whose custom_metadata status is "active" (ESO find by tag),
-// so revoking = mark revoked + destroy every version. Metadata stays as the audit record.
+// Bao's own metadata gives created_time; who/why live in custom_metadata, status=active marks
+// a key the gateway may use (ESO finds by that tag). Revoking deletes the whole secret,
+// metadata included; the record of who revoked what is the app's log line and Bao's audit log.
 import { readFile } from "node:fs/promises";
 import { config } from "./config.js";
+import { customMetadata } from "./keys.js";
 
 const { addr, mount, prefix } = config.bao;
 let token: { value: string; expires: number } | undefined;
@@ -32,14 +33,14 @@ async function bao(method: string, path: string, body?: unknown): Promise<any> {
   return r.status === 204 ? undefined : r.json();
 }
 
+// "incomplete": created but its metadata never landed (a failed create). Not served — the
+// gateway only takes status=active — and revoking it removes it.
 export type KeyRecord = {
   id: string;
-  status: "active" | "revoked";
+  status: "active" | "incomplete";
   description: string;
   createdBy: string;
   createdAt: string;
-  revokedBy?: string;
-  revokedAt?: string;
 };
 
 export async function listKeys(): Promise<KeyRecord[]> {
@@ -55,17 +56,14 @@ export async function getKey(id: string): Promise<KeyRecord | undefined> {
   const cm = m.custom_metadata ?? {};
   return {
     id,
-    status: cm.status === "active" ? "active" : "revoked",
+    status: cm.status === "active" ? "active" : "incomplete",
     description: cm.description ?? "",
     createdBy: cm.created_by ?? "",
     createdAt: m.created_time,
-    revokedBy: cm.revoked_by,
-    revokedAt: cm.revoked_at,
   };
 }
 
-// cas=0: refuses to overwrite an existing id, including a revoked one (ids are never reused,
-// so a revoked key's audit record cannot be replaced by a new key with the same name).
+// cas=0: refuses to overwrite an existing key with the same id.
 export async function createKey(id: string, key: string, description: string, user: string): Promise<boolean> {
   try {
     await bao("POST", `data/${prefix}/${id}`, { options: { cas: 0 }, data: { key } });
@@ -73,18 +71,18 @@ export async function createKey(id: string, key: string, description: string, us
     if (String(e).includes("HTTP 400")) return false; // check-and-set mismatch: id exists
     throw e;
   }
-  await bao("POST", `metadata/${prefix}/${id}`, {
-    custom_metadata: { status: "active", created_by: user, description },
-  });
+  try {
+    await bao("POST", `metadata/${prefix}/${id}`, {
+      custom_metadata: customMetadata({ status: "active", created_by: user, description }),
+    });
+  } catch (e) {
+    // Never leave a usable-looking key without its record.
+    await bao("DELETE", `metadata/${prefix}/${id}`).catch(() => {});
+    throw e;
+  }
   return true;
 }
 
-export async function revokeKey(id: string, user: string): Promise<void> {
-  const m = (await bao("GET", `metadata/${prefix}/${id}`))?.data;
-  if (!m) return;
-  await bao("POST", `metadata/${prefix}/${id}`, {
-    custom_metadata: { ...m.custom_metadata, status: "revoked", revoked_by: user, revoked_at: new Date().toISOString() },
-  });
-  const versions = Object.keys(m.versions ?? {}).map(Number);
-  if (versions.length) await bao("POST", `destroy/${prefix}/${id}`, { versions });
+export async function revokeKey(id: string): Promise<void> {
+  await bao("DELETE", `metadata/${prefix}/${id}`);
 }
