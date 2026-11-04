@@ -23,7 +23,8 @@ jobs:
   # Job key "image" -> SPIFFE ID spiffe://ddupan.top/ci/panxiao81/ai-gateway-keys/image,
   # which zot allows to push this repository (homelab-infra apps/zot/values.yaml).
   image:
-    if: gitea.event_name == 'push' && gitea.ref == 'refs/heads/main'
+    # Manual dispatch on main also publishes, e.g. to retry a push the flaky WAN broke.
+    if: gitea.event_name != 'pull_request' && gitea.ref == 'refs/heads/main'
     needs: verify
     runs-on: [self-hosted, pod]
     permissions:
