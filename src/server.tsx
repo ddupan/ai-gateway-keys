@@ -168,8 +168,8 @@ const KeyList: FC<{ user: User; keys: KeyRecord[]; usage?: Map<string, Usage> }>
       <form method="post" action="/logout">{user.name} <button>退出</button></form>
     </header>
     <p>
-      地址 <code>{config.gatewayUrl}</code>。Claude 客户端用 <code>{config.gatewayUrl}/anthropic</code>，
-      OpenAI 兼容客户端用 <code>{config.gatewayUrl}/v1</code>；Key 放在请求头 <code>x-api-key</code>。
+      Claude 客户端用 <code>{config.gatewayUrl}/anthropic</code>（Claude 和 GPT 模型都能用），
+      OpenAI 兼容客户端用 <code>{config.gatewayUrl}/v1</code>（仅 GPT 模型）。Key 填在客户端的 API Key 设置里。
     </p>
     <h2>新建</h2>
     <form method="post" action="/keys">
