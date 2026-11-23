@@ -1,0 +1,60 @@
+name: CI and image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  # On the homelab ARC runner because zot is LAN-only and authorizes by SPIFFE ID. The SVID comes from
+  # spire-identity-exchange; its SPIRE entry (homelab-infra platform/spire/github-ci.yaml) matches only
+  # this repository's ci.yml on refs/heads/main for push events. A failed push (flaky WAN) is retried
+  # with "Re-run jobs", which keeps the push event.
+  image:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: verify
+    runs-on: homelab
+    permissions:
+      contents: read
+      id-token: write   # GitHub OIDC token, one half of the exchange's proof
+    env:
+      # Flux tracks the digest behind :latest (homelab-infra platform/flux-image-automation).
+      IMAGE: zot-push.lab.ddupan.top/panxiao81/ai-gateway-keys:latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: svid
+        uses: ddupan/ci-actions/spiffe-jwt-svid@v1
+        with:
+          audience: zot
+      - name: Build and push
+        env:
+          SVID: ${{ steps.svid.outputs.svid }}
+        run: |
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$SVID" | docker login zot-push.lab.ddupan.top --username zot --password-stdin >/dev/null
+          docker build -q -t "$IMAGE" .
+          docker push -q "$IMAGE"
